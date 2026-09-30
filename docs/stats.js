@@ -1,0 +1,21 @@
+'use strict';
+const PlayerStats=(()=>{
+ const el=id=>document.getElementById(id),pending=new Map();let run=null,busy=false,loaded={players:[],history:[]};
+ const statusNames={playing:'ยังไม่จบ',paused:'พักเกม',lost:'จบเกม',restarted:'เริ่มใหม่',interrupted:'ออกจากเกม'};
+ function message(text,error=false){el('save-status').textContent=text;el('save-status').classList.toggle('error',error);el('retry-save').hidden=!error;}
+ async function flush(){if(busy)return;busy=true;let failed=false;try{for(const [id,record]of pending){message('กำลังบันทึก…');const result=await ScoreCloud.save(record);if(result.saved!==true)throw new Error('ระบบยังไม่ยืนยันการบันทึก กรุณาลองอีกครั้ง');if(pending.get(id)?.revision===record.revision)pending.delete(id);}if(!pending.size)message('บันทึกสถิติแล้ว');}catch(e){failed=true;message(e.message+' — กดบันทึกอีกครั้งก่อนปิดหน้านี้',true);}finally{busy=false;if(!failed&&pending.size)void flush();}}
+ function begin(player){run={id:crypto.randomUUID(),player,startedAt:new Date().toISOString(),revision:0};}
+ function save(metrics,status){if(!run)return;run.revision++;pending.set(run.id,{...run,...metrics,status});void flush();}
+ const time=s=>`${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,'0')}`;
+ function cells(row,values){for(const value of values){const td=document.createElement('td');td.textContent=String(value);row.append(td);}}
+ function render(){const chosen=el('player-filter').value,people=loaded.players.filter(p=>!chosen||p.player===chosen),history=loaded.history.filter(r=>!chosen||r.player===chosen);const games=people.reduce((n,p)=>n+p.games,0),best=Math.max(0,...people.map(p=>p.best));el('stats-overview').textContent=`${games} รอบที่บันทึก • คะแนนสูงสุด ${best.toLocaleString()} • เคลียร์รวม ${people.reduce((n,p)=>n+p.cleared,0).toLocaleString()} ลูก`;
+ el('player-summary').replaceChildren();for(const p of people){const tr=document.createElement('tr');cells(tr,[p.player,p.games,p.best,p.average,time(p.seconds),p.shots,p.cleared]);el('player-summary').append(tr);}
+ el('run-history').replaceChildren();for(const r of history){const tr=document.createElement('tr');cells(tr,[new Date(r.started_at).toLocaleString('th-TH'),r.player,r.score,time(r.seconds),r.shots,r.cleared,r.combo,statusNames[r.status]||r.status]);el('run-history').append(tr);}
+ el('stats-empty').hidden=history.length>0;el('export-stats').disabled=!history.length;
+ }
+ async function load(){el('stats-message').textContent='กำลังโหลดสถิติ…';try{await flush();const data=await ScoreCloud.load();if(!Array.isArray(data.players)||!Array.isArray(data.history))throw new Error('รูปแบบข้อมูลสถิติไม่ถูกต้อง กรุณาลองใหม่');loaded=data;const old=el('player-filter').value;el('player-filter').replaceChildren();const all=document.createElement('option');all.value='';all.textContent='ผู้เล่นทั้งหมด';el('player-filter').append(all);for(const p of loaded.players){const option=document.createElement('option');option.value=p.player;option.textContent=p.player;el('player-filter').append(option);}el('player-filter').value=loaded.players.some(p=>p.player===old)?old:'';render();el('stats-message').textContent='ข้อมูลของผู้เล่นในเบราว์เซอร์นี้ • เก็บออนไลน์ • ประวัติ 200 รอบล่าสุด';}catch(e){el('stats-message').textContent=e.message;}}
+ function open(){el('stats-dialog').showModal();void load();}
+ function download(){const rows=[['วันเวลา','ผู้เล่น','คะแนน','เวลา(วินาที)','จำนวนยิง','เคลียร์(ลูก)','คอมโบสูงสุด','สถานะ']];for(const r of loaded.history.filter(r=>!el('player-filter').value||r.player===el('player-filter').value))rows.push([r.started_at,r.player,r.score,r.seconds,r.shots,r.cleared,r.combo,statusNames[r.status]||r.status]);const cell=value=>{let s=String(value);if(/^[=+@\-\t\r]/.test(s))s="'"+s;return '"'+s.replaceAll('"','""')+'"';};const blob=new Blob(['\uFEFF'+rows.map(r=>r.map(cell).join(',')).join('\r\n')],{type:'text/csv;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='Number_Orbit_Player_Statistics.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+ el('close-stats').onclick=()=>el('stats-dialog').close();el('refresh-stats').onclick=load;el('export-stats').onclick=download;el('player-filter').onchange=render;el('retry-save').onclick=flush;
+ return {begin,save,open,flush};
+})();
